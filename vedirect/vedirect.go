@@ -76,7 +76,13 @@ func NewStream(stream io.Reader) Stream {
 func (s *Stream) ReadBlock() (Block, int) {
 	var b = Block{}
 	b.fields = make(map[string]string)
-	var frameLength int = 0
+	// frameBuf captures the bytes of an in-flight HEX frame for diagnostic
+	// logging. Capped at frameBufCap; further bytes are counted but not stored.
+	const frameBufCap = 256
+	const postFrameDebugBytes = 32
+	var frameBuf = make([]byte, 0, frameBufCap)
+	var frameTotalLen int = 0
+	var postFrameDebug int = 0
 	var prevState int
 	//var label string
 	//var value string
@@ -101,16 +107,31 @@ func (s *Stream) ReadBlock() (Block, int) {
 			//if str == ":" { // ":": beginning of frame
 			prevState = s.State // save state
 			s.State = InFrame
-			frameLength = 1
+			frameBuf = frameBuf[:0]
+			frameBuf = append(frameBuf, char)
+			frameTotalLen = 1
 			continue
 		}
 		if s.State == InFrame {
-			frameLength = frameLength + 1
+			frameTotalLen++
+			if len(frameBuf) < frameBufCap {
+				frameBuf = append(frameBuf, char)
+			}
 			if str == "\n" { // end of frame
 				s.State = prevState // restore state
-				fmt.Printf("%d bytes HEX frame ignored\n", frameLength)
+				truncNote := ""
+				if frameTotalLen > frameBufCap {
+					truncNote = fmt.Sprintf(" [truncated, captured %d of %d]", frameBufCap, frameTotalLen)
+				}
+				fmt.Printf("HEX frame ignored: prevState=%d len=%d bytes=% x%s\n", prevState, frameTotalLen, frameBuf, truncNote)
+				postFrameDebug = postFrameDebugBytes
 			}
 			continue // ignore frame contents
+		}
+
+		if postFrameDebug > 0 {
+			fmt.Printf("post-HEX byte: state=%d 0x%02x %q\n", s.State, char, string(char))
+			postFrameDebug--
 		}
 
 		// convert byte to integer and add to sum.
