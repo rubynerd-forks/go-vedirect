@@ -9,6 +9,12 @@ import (
 	"github.com/tarm/serial"
 )
 
+// We deliberately avoid log.Fatal in this package's hot paths: a single
+// device read or open error must not be allowed to terminate the calling
+// process, which may be supervising several VE.Direct bridges concurrently.
+// Errors are returned to the caller so it can decide whether to abort,
+// retry, or just drop one streamer.
+
 const (
 	InChecksum = 1
 	InFrame    = 2
@@ -37,24 +43,14 @@ type Streamer interface {
 
 // OpenSerial as the name suggests is for opening serial devices
 // to be fed into NewStream
-func OpenSerial(dev string) io.Reader {
+func OpenSerial(dev string) (io.Reader, error) {
 	c := &serial.Config{Name: dev, Baud: 19200}
-	s, err := serial.OpenPort(c)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return s
+	return serial.OpenPort(c)
 }
 
 // OpenFile for opening files to be fed into NewStream
-func OpenFile(dev string) io.Reader {
-	s, err := os.Open(dev)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return s
+func OpenFile(dev string) (io.Reader, error) {
+	return os.Open(dev)
 }
 
 // NewStream is for initalising a stream for reading blocks
@@ -73,7 +69,7 @@ func NewStream(stream io.Reader) Stream {
 // The value is a single byte, and the modulo 256 sum
 // of all bytes in a block will equal 0 if there were
 // no transmission errors.
-func (s *Stream) ReadBlock() (Block, int) {
+func (s *Stream) ReadBlock() (Block, int, error) {
 	var b = Block{}
 	b.fields = make(map[string]string)
 	// frameBuf captures the bytes of an in-flight HEX frame for diagnostic
@@ -94,7 +90,7 @@ func (s *Stream) ReadBlock() (Block, int) {
 	for {
 		n, err := s.Port.Read(buf)
 		if err != nil {
-			log.Fatal(err)
+			return b, 0, err
 		}
 
 		str := string(buf[:n])
@@ -141,11 +137,7 @@ func (s *Stream) ReadBlock() (Block, int) {
 		// checksum byte could have any value.
 		if s.State == InChecksum {
 			s.State = WaitHeader
-			//if b.checksum % 256 == 0 {
-			return b, b.checksum % 256 // 0 on valid checksum
-			//} else {
-			//  fmt.Println("Bad block!", b.fields)
-			//}
+			return b, b.checksum % 256, nil // residue 0 on valid checksum
 		}
 
 		switch char {

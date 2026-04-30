@@ -44,7 +44,9 @@ func TestNewStreamValidFrame(t *testing.T) {
 	var checksum int
 
 	for checksum == 0 {
-		block, checksum = s.ReadBlock()
+		var err error
+		block, checksum, err = s.ReadBlock()
+		assert.NoError(err)
 		break
 	}
 
@@ -74,7 +76,9 @@ func TestNewStreamInvalidChecksum(t *testing.T) {
 	var checksum int
 
 	for checksum == 0 {
-		_, checksum = s.ReadBlock()
+		var err error
+		_, checksum, err = s.ReadBlock()
+		assert.NoError(err)
 		break
 	}
 
