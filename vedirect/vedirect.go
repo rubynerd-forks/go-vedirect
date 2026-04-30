@@ -16,6 +16,12 @@ import (
 // retry, or just drop one streamer.
 
 const (
+	// Initial is the zero-value state on a freshly created Stream, before
+	// any byte has been observed. In this state we may be mid-block in the
+	// underlying transport, so bytes are dropped until the first \r is
+	// seen. That \r is taken as the start of the first parsable block and
+	// is the first byte added to the running checksum.
+	Initial    = 0
 	InChecksum = 1
 	InFrame    = 2
 	InLabel    = 3
@@ -57,7 +63,7 @@ func OpenFile(dev string) (io.Reader, error) {
 func NewStream(stream io.Reader) Stream {
 	s := Stream{}
 	s.Port = stream
-	s.State = 0
+	s.State = Initial
 
 	log.Println("Stream initialized:", s)
 	return s
@@ -95,6 +101,23 @@ func (s *Stream) ReadBlock() (Block, int, error) {
 
 		str := string(buf[:n])
 		var char byte = buf[0]
+
+		// Initial sync: on a freshly opened stream we may be mid-block in
+		// the underlying transport. Drop bytes until we see the first \r,
+		// which under VE.Direct text protocol always marks the start of a
+		// field separator (\r\n<Label>\t<Value>). That \r is counted as
+		// the first byte of the running checksum, matching the protocol's
+		// definition of where a block begins. The first block parsed
+		// after sync will likely still fail its checksum because we
+		// joined an in-progress block; the caller is expected to skip
+		// bad blocks and the next block will be clean.
+		if s.State == Initial {
+			if char == 13 { // \r
+				s.State = InLabel
+				b.checksum += int(char)
+			}
+			continue
+		}
 
 		// HEX mode is documented in BlueSolar-HEX-protocol-MPPT.pdf.
 		// catch and ignore VE.Direct HEX frames from stream, otherwise

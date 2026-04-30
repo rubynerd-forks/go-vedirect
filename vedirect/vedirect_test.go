@@ -59,8 +59,16 @@ func TestNewStreamValidFrame(t *testing.T) {
 	assert.Equal("146", fields["FW"])
 	assert.Equal("31300", fields["VPV"])
 
-	// Expect t the same nummber of feilds in as we get out
-	assert.Equal(20, len(fields))
+	// 19 named fields in the test fixture (PID..HSDS); Checksum is the
+	// terminator and is never stored as a field. Previously this expected
+	// 20 because the parser stored a spurious "" -> "" entry on the very
+	// first \r when starting in the unnamed zero state; that bug is fixed
+	// (see Initial state handling in vedirect.go).
+	assert.Equal(19, len(fields))
+
+	// Confirm no empty-key entry leaked through.
+	_, hasEmpty := fields[""]
+	assert.False(hasEmpty)
 
 }
 
